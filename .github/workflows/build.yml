@@ -1,0 +1,60 @@
+name: APK bauen
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Signatur-Schlüssel bereitstellen
+        run: cp signing/release.jks app/release.jks
+
+      - name: APK bauen
+        env:
+          KS_PASS: K412e6776aaf48a013883043aff480462
+        run: gradle --no-daemon assembleRelease
+
+      - name: APK umbenennen
+        run: |
+          V="1.$((${{ github.run_number }} - 1))"
+          echo "V=$V" >> $GITHUB_ENV
+          cp app/build/outputs/apk/release/app-release.apk "O2Nachbuchen_v$V.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: O2Nachbuchen_v${{ env.V }}
+          path: O2Nachbuchen_v${{ env.V }}.apk
+
+      - name: Release veröffentlichen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$V" "O2Nachbuchen_v$V.apk" --title "O2 Nachbuchen v$V" --notes "Automatisch gebaut (Build ${{ github.run_number }})" --latest
+
+      - name: APK in Branch 'apk' ablegen
+        run: |
+          mkdir /tmp/out && cp "O2Nachbuchen_v$V.apk" /tmp/out/
+          cd /tmp/out
+          git init -q -b apk
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add .
+          git commit -q -m "APK v$V"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" apk
