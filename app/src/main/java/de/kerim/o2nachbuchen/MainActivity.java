@@ -183,6 +183,7 @@ public class MainActivity extends Activity {
         boolean sms = hasSms();
         boolean notif = hasNotif();
         boolean battery = batteryFree();
+        boolean noPause = notPaused();
         boolean on = Store.isEnabled(this);
 
         autoSwitch.setChecked(on);
@@ -199,6 +200,10 @@ public class MainActivity extends Activity {
             statusTitle.setText("● Aktiv (mit Einschränkung)");
             statusTitle.setTextColor(ORANGE);
             statusSub.setText("Bitte Akku auf „Nicht eingeschränkt“ stellen, damit Samsung die App nicht schlafen legt.");
+        } else if (!noPause) {
+            statusTitle.setText("● Aktiv (mit Einschränkung)");
+            statusTitle.setTextColor(ORANGE);
+            statusSub.setText("Bitte „App-Aktivität pausieren“ ausschalten – sonst schaltet Android die App nach einigen Monaten ohne Öffnen ab.");
         } else {
             statusTitle.setText("● Aktiv");
             statusTitle.setTextColor(GREEN);
@@ -216,6 +221,9 @@ public class MainActivity extends Activity {
         setupBox.addView(setupRow("Akku: Nicht eingeschränkt", battery,
                 battery ? "Eingestellt" : "Sonst kann Samsung die App im Hintergrund stoppen",
                 "Einstellen", v -> askBattery()));
+        setupBox.addView(setupRow("Nie automatisch pausieren", noPause,
+                noPause ? "Eingestellt" : "Sonst entzieht Android nach Monaten ohne Öffnen die Berechtigungen",
+                "Einstellen", v -> askNoPause()));
 
         // Statistik
         statMonth.setText("Diesen Monat nachgebucht: " + Store.sentThisMonth(this) + " × 1 GB");
@@ -297,6 +305,26 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void askNoPause() {
+        new AlertDialog.Builder(this)
+                .setTitle("Nie automatisch pausieren")
+                .setMessage("Gleich öffnet sich die App-Info.\n\n"
+                        + "Dort den Schalter „App-Aktivität pausieren, wenn nicht verwendet“ "
+                        + "(oder „Berechtigungen entfernen, wenn App nicht verwendet wird“) AUSschalten.\n\n"
+                        + "Danach zurück in diese App.")
+                .setPositiveButton("Öffnen", (d, w) -> {
+                    try {
+                        Intent i = new Intent(Intent.ACTION_AUTO_REVOKE_PERMISSIONS);
+                        i.setData(Uri.parse("package:" + getPackageName()));
+                        startActivity(i);
+                    } catch (Exception e) {
+                        openAppInfo();
+                    }
+                })
+                .setNegativeButton("Abbrechen", null)
+                .show();
+    }
+
     private void openAppInfo() {
         try {
             Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
@@ -313,6 +341,7 @@ public class MainActivity extends Activity {
                 Store.log(this, "OK", "SMS-Berechtigung erteilt – App ist bereit");
                 if (!batteryFree()) askBattery();
                 else if (!hasNotif()) askNotif();
+                else if (!notPaused()) askNoPause();
             } else {
                 showRestrictedHelp();
             }
@@ -330,6 +359,16 @@ public class MainActivity extends Activity {
     private boolean hasNotif() {
         if (Build.VERSION.SDK_INT < 33) return true;
         return checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    /** true = Android pausiert die App nie (Berechtigungen bleiben dauerhaft). */
+    private boolean notPaused() {
+        if (Build.VERSION.SDK_INT < 30) return true;
+        try {
+            return getPackageManager().isAutoRevokeWhitelisted();
+        } catch (Exception e) {
+            return true;
+        }
     }
 
     private boolean batteryFree() {

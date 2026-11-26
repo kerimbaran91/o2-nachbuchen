@@ -39,5 +39,10 @@
             android:name=".SentReceiver"
             android:exported="false" />
 
+        <!-- Neuer Versuch, falls die WEITER-SMS nicht verschickt werden konnte -->
+        <receiver
+            android:name=".RetryReceiver"
+            android:exported="false" />
+
     </application>
 </manifest>

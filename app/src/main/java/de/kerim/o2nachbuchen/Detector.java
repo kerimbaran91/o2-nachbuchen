@@ -15,12 +15,15 @@ public final class Detector {
     public static boolean isO2(String address) {
         if (address == null) return false;
         String digits = address.replaceAll("[^0-9]", "");
-        return digits.endsWith(NUMBER);
+        // nur die echte Kurzwahl 80112 (ggf. mit deutscher Ländervorwahl), keine normalen Handynummern
+        return digits.equals(NUMBER) || digits.equals("49" + NUMBER) || digits.equals("0049" + NUMBER);
     }
 
     public static Result classify(String body) {
         if (body == null) return Result.OTHER;
-        String t = body.toLowerCase(Locale.GERMAN);
+        // geschützte / schmale Leerzeichen (z. B. "80 %") wie normale Leerzeichen behandeln
+        String t = body.replace('\u00A0', ' ').replace('\u202F', ' ').replace('\u2009', ' ')
+                .replace('\u2007', ' ').toLowerCase(Locale.GERMAN);
 
         // Fehlermeldungen von O2 -> nicht erneut senden (sonst Endlosschleife)
         if (has(t, "konnte nicht", "nicht durchgeführt", "nicht möglich", "fehlgeschlagen",

@@ -1,5 +1,6 @@
 package de.kerim.o2nachbuchen;
 
+import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -27,12 +28,24 @@ public final class Booker {
 
     private Booker() {}
 
-    /** @return null bei Erfolg, sonst ein Text, warum nicht gesendet wurde. */
-    public static synchronized String book(Context ctx, int subId, boolean auto, String reason) {
+    /** Wie oft ein fehlgeschlagener automatischer Versand wiederholt wird. */
+    static final int MAX_RETRIES = 3;
+    /** Abstand zwischen den Wiederholungen. */
+    static final long RETRY_DELAY_MS = 2 * 60 * 1000L;
+
+    public static String book(Context ctx, int subId, boolean auto, String reason) {
+        return book(ctx, subId, auto, reason, 0);
+    }
+
+    /**
+     * @param attempt 0 = erster Versuch, 1..3 = automatische Wiederholung nach Sendefehler
+     * @return null bei Erfolg, sonst ein Text, warum nicht gesendet wurde.
+     */
+    public static synchronized String book(Context ctx, int subId, boolean auto, String reason, int attempt) {
         Context c = ctx.getApplicationContext();
         long now = System.currentTimeMillis();
 
-        if (auto) {
+        if (auto && attempt == 0) {
             long since = now - Store.lastAuto(c);
             if (since >= 0 && since < AUTO_COOLDOWN_MS) {
                 String m = "Nicht erneut gebucht – letzte Buchung vor " + (since / 1000) + " s (Doppel-Schutz)";
@@ -59,12 +72,14 @@ public final class Booker {
             SmsManager sms = manager(c, subId);
             Intent sent = new Intent(c, SentReceiver.class);
             sent.putExtra("auto", auto);
+            sent.putExtra("attempt", attempt);
+            sent.putExtra("sub", subId);
             PendingIntent pi = PendingIntent.getBroadcast(c, (int) (now & 0xFFFF), sent,
                     PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
 
             Store.markAttempt(c, auto);
             sms.sendTextMessage(Detector.NUMBER, null, TEXT, pi, null);
-            Store.log(c, "INFO", (auto ? "Automatisch: " : "Von Hand: ") + "„" + TEXT + "“ an "
+            Store.log(c, "INFO", (attempt > 0 ? attempt + ". Wiederholung: " : auto ? "Automatisch: " : "Von Hand: ") + "„" + TEXT + "“ an "
                     + Detector.NUMBER + " gesendet" + (reason != null ? " (" + reason + ")" : ""));
             return null;
         } catch (SecurityException e) {
@@ -77,6 +92,26 @@ public final class Booker {
             Store.log(c, "ERR", m);
             notify(c, CH_WARN, 3, "Nachbuchen fehlgeschlagen", m);
             return m;
+        }
+    }
+
+    /** Plant nach einem Sendefehler einen neuen Versuch in 2 Minuten. */
+    static boolean scheduleRetry(Context ctx, int subId, int nextAttempt) {
+        if (nextAttempt > MAX_RETRIES) return false;
+        try {
+            Context c = ctx.getApplicationContext();
+            Intent i = new Intent(c, RetryReceiver.class);
+            i.putExtra("attempt", nextAttempt);
+            i.putExtra("sub", subId);
+            i.putExtra("since", System.currentTimeMillis());
+            PendingIntent pi = PendingIntent.getBroadcast(c, 7000 + nextAttempt, i,
+                    PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+            AlarmManager am = c.getSystemService(AlarmManager.class);
+            if (am == null) return false;
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + RETRY_DELAY_MS, pi);
+            return true;
+        } catch (Exception e) {
+            return false;
         }
     }
 
